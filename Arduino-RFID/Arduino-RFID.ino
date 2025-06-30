@@ -1,45 +1,56 @@
 #include <SPI.h>
 #include <MFRC522.h>
 #include <LiquidCrystal.h>
+#include <EEPROM.h>
 
 #define RST_PIN 9
 #define SS_PIN 10
+#define ANALOG_BUTTON_PIN A0
 
-byte readCard[4];
-String MasterTag = "139B4CCD";  // REPLACE this Tag ID with your Tag ID!
+MFRC522 mfrc522(SS_PIN, RST_PIN);  // RFID
+LiquidCrystal lcd(7, 6, 5, 4, 3, 2);  // LCD
+
 String tagID = "";
+byte readCard[4];
+int buttonPressed = 0;
 
-MFRC522 mfrc522(SS_PIN, RST_PIN);
-
-// RS, E, D4, D5, D6, D7
-LiquidCrystal lcd(7, 6, 5, 4, 3, 2);
+// Button thresholds
+int getButton() {
+  int val = analogRead(ANALOG_BUTTON_PIN);
+  if (val < 100) return 1;
+  if (val < 300) return 2;
+  if (val < 500) return 3;
+  if (val < 750) return 4;
+  if (val < 950) return 5;
+  return 0;
+}
 
 void setup() {
-  Serial.begin(9600);		
-	while (!Serial);
+  Serial.begin(9600);
+  SPI.begin();
+  mfrc522.PCD_Init();
 
-  SPI.begin();         // SPI 
-  mfrc522.PCD_Init();  // MFRC522
-  delay(4);
-
-  lcd.begin(16, 2);    // LCD 
-  lcd.clear();
+  lcd.begin(16, 2);
   lcd.print(" Access Control ");
   lcd.setCursor(0, 1);
   lcd.print("Scan Your Card>>");
 }
 
 void loop() {
+  buttonPressed = getButton();
+  if (buttonPressed == 1) {
+    lcd.clear();
+    lcd.print("Learning Mode");
+    delay(1000);
+    learnNewTag();
+  }
 
-  //Wait until new tag is available
   while (getID()) {
     lcd.clear();
     lcd.setCursor(0, 0);
 
-    if (tagID == MasterTag) {
-
+    if (isTagAuthorized()) {
       lcd.print(" Access Granted!");
-      // You can write any code here like opening doors, switching on a relay, lighting up an LED, or anything else you can think of.
     } else {
       lcd.print(" Access Denied!");
     }
@@ -47,34 +58,87 @@ void loop() {
     lcd.setCursor(0, 1);
     lcd.print(" ID : ");
     lcd.print(tagID);
-
     delay(2000);
-
-    lcd.clear();
-    lcd.print(" Access Control ");
-    lcd.setCursor(0, 1);
-    lcd.print("Scan Your Card>>");
+    resetLCD();
   }
 }
 
-//Read new tag if available
 boolean getID() {
-  // Getting ready for Reading PICCs
-  if (!mfrc522.PICC_IsNewCardPresent()) {  //If a new PICC placed to RFID reader continue
-    return false;
-  }
-  if (!mfrc522.PICC_ReadCardSerial()) {  //Since a PICC placed get Serial and continue
-    return false;
-  }
+  if (!mfrc522.PICC_IsNewCardPresent()) return false;
+  if (!mfrc522.PICC_ReadCardSerial()) return false;
+
   tagID = "";
-  for (uint8_t i = 0; i < 4; i++) {  // The MIFARE PICCs that we use have 4 byte UID
-    //readCard[i] = mfrc522.uid.uidByte[i];
-    tagID.concat(String(mfrc522.uid.uidByte[i], HEX));  // Adds the 4 bytes in a single String variable
+  for (uint8_t i = 0; i < 4; i++) {
+    readCard[i] = mfrc522.uid.uidByte[i];
+    tagID.concat(String(readCard[i], HEX));
   }
 
   tagID.toUpperCase();
-
-  mfrc522.PICC_HaltA();  // Stop reading
-
+  mfrc522.PICC_HaltA();
   return true;
+}
+
+void resetLCD() {
+  lcd.clear();
+  lcd.print(" Access Control ");
+  lcd.setCursor(0, 1);
+  lcd.print("Scan Your Card>>");
+}
+
+bool isTagAuthorized() {
+  byte storedTag[4];
+  int tagCount = EEPROM.read(100);
+
+  for (int i = 0; i < tagCount; i++) {
+    for (int j = 0; j < 4; j++) {
+      storedTag[j] = EEPROM.read(i * 4 + j);
+    }
+
+    String tempID = "";
+    for (int k = 0; k < 4; k++) {
+      tempID.concat(String(storedTag[k], HEX));
+    }
+    tempID.toUpperCase();
+
+    if (tempID == tagID) return true;
+  }
+
+  return false;
+}
+
+void learnNewTag() {
+  lcd.clear();
+  lcd.print("Scan New Tag...");
+  while (!getID());  // Wait for a new tag
+  delay(500);
+
+  if (isTagAuthorized()) {
+    lcd.clear();
+    lcd.print("Tag Already");
+    lcd.setCursor(0, 1);
+    lcd.print("Authorized!");
+    delay(2000);
+    resetLCD();
+    return;
+  }
+
+  int tagCount = EEPROM.read(100);
+  if (tagCount >= 10) {
+    lcd.clear();
+    lcd.print("Storage Full!");
+    delay(2000);
+    resetLCD();
+    return;
+  }
+
+  for (int i = 0; i < 4; i++) {
+    EEPROM.write(tagCount * 4 + i, readCard[i]);
+  }
+
+  EEPROM.write(100, tagCount + 1);
+
+  lcd.clear();
+  lcd.print("Tag Stored!");
+  delay(2000);
+  resetLCD();
 }
