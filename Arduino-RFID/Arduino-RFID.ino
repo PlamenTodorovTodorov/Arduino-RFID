@@ -38,11 +38,17 @@ void setup() {
 
 void loop() {
   buttonPressed = getButton();
+
   if (buttonPressed == 1) {
     lcd.clear();
     lcd.print("Learning Mode");
     delay(1000);
     learnNewTag();
+  } else if (buttonPressed == 2) {
+    lcd.clear();
+    lcd.print("Clearing Tags");
+    delay(1000);
+    clearEEPROM();
   }
 
   while (getID()) {
@@ -56,7 +62,7 @@ void loop() {
     }
 
     lcd.setCursor(0, 1);
-    lcd.print(" ID : ");
+    lcd.print("ID: ");
     lcd.print(tagID);
     delay(2000);
     resetLCD();
@@ -70,7 +76,9 @@ boolean getID() {
   tagID = "";
   for (uint8_t i = 0; i < 4; i++) {
     readCard[i] = mfrc522.uid.uidByte[i];
+    if (readCard[i] < 0x10) tagID.concat("0");  // leading zero for single digit hex
     tagID.concat(String(readCard[i], HEX));
+    if (i < 3) tagID.concat(" ");  // space between bytes
   }
 
   tagID.toUpperCase();
@@ -96,7 +104,9 @@ bool isTagAuthorized() {
 
     String tempID = "";
     for (int k = 0; k < 4; k++) {
+      if (storedTag[k] < 0x10) tempID.concat("0");
       tempID.concat(String(storedTag[k], HEX));
+      if (k < 3) tempID.concat(" ");
     }
     tempID.toUpperCase();
 
@@ -139,6 +149,18 @@ void learnNewTag() {
 
   lcd.clear();
   lcd.print("Tag Stored!");
+  delay(2000);
+  resetLCD();
+}
+
+void clearEEPROM() {
+  for (int i = 0; i < 100; i++) {
+    EEPROM.write(i, 0);
+  }
+  EEPROM.write(100, 0);  // Reset tag count
+
+  lcd.clear();
+  lcd.print("EEPROM Cleared!");
   delay(2000);
   resetLCD();
 }
